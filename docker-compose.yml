@@ -39,7 +39,7 @@ services:
       retries: 10
       start_period: 30s
 
-  # ── Kafka UI (opsional tapi sangat membantu saat demo) ────
+  # ── Kafka UI (monitor data di http://localhost:8080) ──────
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
     container_name: kafka-ui
@@ -51,23 +51,46 @@ services:
       KAFKA_CLUSTERS_0_NAME: local
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
 
-  # ── Flight Producer (tugasmu) ─────────────────────────────
+  # ── Flight Producer (Anggota 1) ───────────────────────────
   flight-producer:
-    build: ./producer
+    build: ./Producer
     container_name: flight-producer
     networks: [flight-net]
     depends_on:
       kafka:
-        condition: service_healthy   # <-- tunggu sampai healthcheck Kafka lulus
+        condition: service_healthy
     env_file: .env
     environment:
       - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
     restart: on-failure
-  
-  # ── Redis (untuk Anggota 4, tapi kamu yang setup) ─────────
+
+  # ── Redis (output sink Spark → Anggota 4 visualisasi) ────
   redis:
     image: redis:7.2-alpine
     container_name: redis
     networks: [flight-net]
     ports:
       - "6379:6379"
+
+  # ── Spark Processor (Anggota 2) ───────────────────────────
+  spark-processor:
+    build: ./Spark
+    container_name: spark-processor
+    networks: [flight-net]
+    depends_on:
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - KAFKA_TOPIC=commercial-flight-stream
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - MODEL_PATH=/app/model_keterlambatan
+    volumes:
+      # Mount folder model agar hasil training bisa dipakai
+      - ./Spark/model_keterlambatan:/app/model_keterlambatan
+      # Mount checkpoint agar stream bisa resume setelah restart
+      - ./Spark/checkpoint_spark:/app/checkpoint_spark
+    restart: on-failure
