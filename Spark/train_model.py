@@ -241,9 +241,10 @@ def main():
 
     # Tampilkan confusion matrix sederhana
     print("\nContoh 10 prediksi:")
+    extract_prob = F.udf(lambda v: float(v[1]) if v is not None else 0.0, FloatType())
     predictions.select(
         "label", "prediction",
-        F.round(F.col("probability").getItem(1), 3).alias("prob_delay")
+        F.round(extract_prob(F.col("probability")), 3).alias("prob_delay")
     ).show(10)
 
     # 6. Simpan model
