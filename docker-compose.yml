@@ -1,0 +1,73 @@
+version: "3.9"
+
+networks:
+  flight-net:
+    driver: bridge
+
+services:
+
+  # ── Zookeeper (wajib ada sebelum Kafka) ──────────────────
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: zookeeper
+    networks: [flight-net]
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+  # ── Kafka Broker ──────────────────────────────────────────
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: kafka
+    networks: [flight-net]
+    depends_on: [zookeeper]
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    healthcheck:
+      test: ["CMD", "kafka-topics", "--bootstrap-server", "kafka:29092", "--list"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  # ── Kafka UI (opsional tapi sangat membantu saat demo) ────
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    networks: [flight-net]
+    depends_on: [kafka]
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+
+  # ── Flight Producer (tugasmu) ─────────────────────────────
+  flight-producer:
+    build: ./producer
+    container_name: flight-producer
+    networks: [flight-net]
+    depends_on:
+      kafka:
+        condition: service_healthy   # <-- tunggu sampai healthcheck Kafka lulus
+    env_file: .env
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+    restart: on-failure
+  
+  # ── Redis (untuk Anggota 4, tapi kamu yang setup) ─────────
+  redis:
+    image: redis:7.2-alpine
+    container_name: redis
+    networks: [flight-net]
+    ports:
+      - "6379:6379"
