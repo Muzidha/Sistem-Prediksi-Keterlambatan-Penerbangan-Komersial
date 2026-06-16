@@ -12,6 +12,10 @@ venv/
 # Docker volumes
 data/
 
+# Spark runtime artifacts (checkpoint & trained model)
+Spark/checkpoint_spark/
+Spark/model_keterlambatan/
+
 # IDE
 .vscode/
 .idea/
