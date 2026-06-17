@@ -93,4 +93,22 @@ services:
       - ./Spark/model_keterlambatan:/app/model_keterlambatan
       # Mount checkpoint agar stream bisa resume setelah restart
       - ./Spark/checkpoint_spark:/app/checkpoint_spark
+      # Mount Delta Lake untuk penyimpanan histori permanen (Anggota 4)
+      - ./delta_lake:/app/delta_lake
+    restart: on-failure
+
+  # ── Backend API + WebSocket (Anggota 4) ───────────────────
+  backend:
+    build: ./Backend
+    container_name: backend
+    networks: [flight-net]
+    depends_on:
+      redis:
+        condition: service_started
+    ports:
+      - "8000:8000"
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
     restart: on-failure

@@ -20,6 +20,7 @@ import json
 import redis
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
+from pyspark.sql.functions import udf
 from pyspark.sql.types import (
     StructType, StructField,
     StringType, FloatType, IntegerType,
@@ -35,6 +36,18 @@ REDIS_HOST        = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT        = int(os.getenv("REDIS_PORT", 6379))
 MODEL_PATH        = os.getenv("MODEL_PATH", "./model_keterlambatan")
 CHECKPOINT_DIR    = "./checkpoint_spark"
+
+# ─── Aircraft capacity lookup (untuk estimasi penumpang terdampak) ─
+AIRCRAFT_CAPACITY = {
+    "A20N": 180, "A21N": 220, "A319": 150, "A320": 180, "A321": 220,
+    "A332": 250, "A333": 300, "A343": 300, "A359": 325,
+    "B738": 189, "B739": 215, "B73H": 189, "B744": 416, "B748": 467,
+    "B752": 200, "B763": 290, "B772": 400, "B773": 450, "B77W": 396,
+    "B788": 250, "B789": 290, "B78X": 330,
+    "CRJ9":  90, "E190": 100, "E195": 120,
+}
+DEFAULT_CAPACITY = 180
+DEFAULT_LOAD_FACTOR = 0.85
 
 # ─── Schema JSON dari Kafka ─────────────────────────────────
 # Sesuai dengan format yang dikirim Producer (Anggota 1)
@@ -66,16 +79,19 @@ flight_schema = StructType([
 
 
 def create_spark_session():
-    """Membuat SparkSession dengan package Kafka."""
+    """Membuat SparkSession dengan package Kafka & Delta Lake."""
     print("[SPARK] Menginisialisasi SparkSession...")
     spark = (
         SparkSession.builder
         .appName("FlightDelayPrediction")
-        # Package kafka connector untuk Spark — sesuaikan versi Scala/Spark kamu
+        # Package kafka connector & delta lake untuk Spark
         .config(
             "spark.jars.packages",
-            "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0"
+            "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,io.delta:delta-spark_2.12:3.0.0"
         )
+        # Konfigurasi catalog Delta Lake
+        .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
+        .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")
         .config("spark.sql.streaming.checkpointLocation", CHECKPOINT_DIR)
         # Supaya log tidak terlalu ramai
         .config("spark.sql.shuffle.partitions", "4")
@@ -290,6 +306,62 @@ def feature_engineering(df):
     return featured
 
 
+# ─── UDF untuk estimasi kapasitas penumpang ─────────────────
+@udf(IntegerType())
+def get_capacity(aircraft_model):
+    """Lookup kapasitas kursi berdasarkan tipe pesawat."""
+    return AIRCRAFT_CAPACITY.get(aircraft_model, DEFAULT_CAPACITY)
+
+
+def compute_impact_metrics(df):
+    """
+    Hitung metrik dampak tambahan (Anggota 4):
+      - capacity: kapasitas kursi pesawat
+      - affected_passengers: estimasi penumpang terdampak
+      - fdi: Flight Delay Index (0-100)
+      - fdi_category: LOW / MODERATE / HIGH / CRITICAL
+      - estimated_compensation_eur: estimasi biaya kompensasi (EUR)
+    """
+    impacted = (
+        df
+        # Kapasitas & penumpang terdampak
+        .withColumn("capacity", get_capacity(F.col("aircraft_model")))
+        .withColumn("affected_passengers",
+            F.round(F.col("capacity") * DEFAULT_LOAD_FACTOR).cast(IntegerType()))
+
+        # Normalisasi delay untuk FDI (cap 180 menit = 1.0)
+        .withColumn("normalized_delay",
+            F.least(F.col("predicted_delay_minutes") / 180.0, F.lit(1.0))
+             .cast(FloatType()))
+
+        # Flight Delay Index (0-100) — komposit multi-faktor
+        .withColumn("fdi",
+            (
+                F.col("normalized_delay") * 40.0 +
+                F.col("weather_score") * 25.0 +
+                (F.col("traffic_density") / 10.0) * 15.0 +
+                F.least(F.col("route_deviation") / 50.0, F.lit(1.0)) * 10.0 +
+                F.col("is_peak_hour") * 10.0
+            ).cast(FloatType()))
+
+        # Kategori FDI
+        .withColumn("fdi_category",
+            F.when(F.col("fdi") <= 25,  "LOW")
+             .when(F.col("fdi") <= 50,  "MODERATE")
+             .when(F.col("fdi") <= 75,  "HIGH")
+             .otherwise("CRITICAL"))
+
+        # Estimasi biaya kompensasi (model EU261 sederhana)
+        .withColumn("estimated_compensation_eur",
+            F.when(F.col("predicted_delay_minutes") < 180, F.lit(0))
+             .when(F.col("distance_km") < 1500, F.col("affected_passengers") * 250)
+             .when(F.col("distance_km") < 3500, F.col("affected_passengers") * 400)
+             .otherwise(F.col("affected_passengers") * 600)
+             .cast(IntegerType()))
+    )
+    return impacted
+
+
 def predict_delay(df, model=None):
     """
     Prediksi keterlambatan dalam MENIT (regresi).
@@ -342,13 +414,15 @@ def write_to_redis(batch_df, batch_id):
 
         rows = batch_df.select(
             "flight_id", "callsign", "airline_icao", "aircraft_model",
-            "origin", "destination",
+            "registration", "origin", "destination",
             "latitude", "longitude", "altitude_ft", "speed_kn",
             "precipitation_mm", "wind_knots", "visibility_m",
             "weather_score", "traffic_density",
             "distance_km", "route_deviation",
             "predicted_delay_minutes", "delay_category",
-            "risk_score_manual", "hour_utc", "flight_phase"
+            "capacity", "affected_passengers",
+            "fdi", "fdi_category", "estimated_compensation_eur",
+            "timestamp", "risk_score_manual", "hour_utc", "flight_phase"
         ).collect()
 
         pipe = r.pipeline()
@@ -359,6 +433,7 @@ def write_to_redis(batch_df, batch_id):
                 "callsign":                row["callsign"]         or "",
                 "airline":                 row["airline_icao"]     or "",
                 "aircraft":                row["aircraft_model"]   or "",
+                "registration":            row["registration"]     or "",
                 "origin":                  row["origin"]           or "",
                 "destination":             row["destination"]      or "",
                 "lat":                     str(row["latitude"]     or 0),
@@ -374,6 +449,11 @@ def write_to_redis(batch_df, batch_id):
                 "route_deviation":         f"{row['route_deviation']:.2f}",
                 "predicted_delay_minutes": f"{row['predicted_delay_minutes']:.1f}",
                 "delay_category":          row["delay_category"]  or "UNKNOWN",
+                "capacity":                str(row["capacity"]              or 0),
+                "affected_passengers":     str(row["affected_passengers"]   or 0),
+                "fdi":                     f"{row['fdi']:.1f}",
+                "fdi_category":            row["fdi_category"]  or "UNKNOWN",
+                "estimated_compensation_eur": str(row["estimated_compensation_eur"] or 0),
                 "risk_score":              f"{row['risk_score_manual']:.2f}",
                 "hour_utc":                str(row["hour_utc"]     or 0),
                 "flight_phase":            str(row["flight_phase"] or 0),
@@ -384,22 +464,41 @@ def write_to_redis(batch_df, batch_id):
             pipe.hset(key, mapping=data)
             pipe.expire(key, 300)   # data expired setelah 5 menit
 
+            # ── Track rotasi pesawat untuk Ripple Effect Score ──
+            # Simpan urutan penerbangan per registrasi dalam sorted set
+            reg = row["registration"]
+            ts = row["timestamp"]
+            if reg and ts:
+                rotation_key = f"rotation:{reg}"
+                pipe.zadd(rotation_key, {row["flight_id"]: int(ts)})
+                pipe.expire(rotation_key, 86400)  # keep 24h
+
         # Ringkasan statistik batch
         delayed_count = sum(1 for r in rows
                             if r["delay_category"] in
                             ("MEDIUM DELAY", "CRITICAL DELAY"))
         critical_count = sum(1 for r in rows
                              if r["delay_category"] == "CRITICAL DELAY")
+        high_fdi_count = sum(1 for r in rows
+                             if r["fdi_category"] in ("HIGH", "CRITICAL"))
         avg_delay = (sum(r["predicted_delay_minutes"] or 0 for r in rows)
                      / max(len(rows), 1))
+        avg_fdi = (sum(r["fdi"] or 0 for r in rows)
+                   / max(len(rows), 1))
+        total_passengers = sum(r["affected_passengers"] or 0 for r in rows)
+        total_compensation = sum(r["estimated_compensation_eur"] or 0 for r in rows)
 
         stats = {
-            "batch_id":          str(batch_id),
-            "total_flights":     str(len(rows)),
-            "delayed_flights":   str(delayed_count),
-            "critical_flights":  str(critical_count),
-            "avg_delay_minutes": f"{avg_delay:.1f}",
-            "updated_at":        str(
+            "batch_id":                    str(batch_id),
+            "total_flights":               str(len(rows)),
+            "delayed_flights":             str(delayed_count),
+            "critical_flights":            str(critical_count),
+            "high_fdi_flights":            str(high_fdi_count),
+            "avg_delay_minutes":           f"{avg_delay:.1f}",
+            "avg_fdi":                     f"{avg_fdi:.1f}",
+            "total_affected_passengers":   str(total_passengers),
+            "total_estimated_compensation_eur": str(total_compensation),
+            "updated_at":                  str(
                 __import__("datetime").datetime.utcnow().isoformat()
             ) + "Z",
         }
@@ -408,7 +507,9 @@ def write_to_redis(batch_df, batch_id):
 
         print(f"[REDIS] Batch {batch_id}: {len(rows)} penerbangan | "
               f"Delayed: {delayed_count} | Critical: {critical_count} | "
-              f"Avg delay: {avg_delay:.1f} min")
+              f"High FDI: {high_fdi_count} | Avg delay: {avg_delay:.1f} min | "
+              f"Avg FDI: {avg_fdi:.1f} | Pax: {total_passengers} | "
+              f"Compensation: EUR {total_compensation}")
 
     except Exception as e:
         print(f"[REDIS ERROR] Batch {batch_id}: {e}")
@@ -421,13 +522,15 @@ def write_to_kafka_out(df):
     """
     output_cols = [
         "flight_id", "callsign", "airline_icao", "aircraft_model",
-        "origin", "destination",
+        "registration", "origin", "destination",
         "latitude", "longitude", "altitude_ft", "speed_kn",
         "predicted_delay_minutes", "delay_category",
+        "capacity", "affected_passengers",
+        "fdi", "fdi_category", "estimated_compensation_eur",
         "weather_score", "traffic_density",
         "distance_km", "route_deviation",
         "precipitation_mm", "wind_knots", "weather_code",
-        "hour_utc", "flight_phase", "ingested_at"
+        "timestamp", "hour_utc", "flight_phase", "ingested_at"
     ]
 
     # Buat struct dan convert ke JSON string untuk dikirim ke Kafka
@@ -440,6 +543,26 @@ def write_to_kafka_out(df):
         .select("key", "value")
     )
     return kafka_out
+
+
+def write_to_delta(df):
+    """
+    Menyimpan hasil prediksi ke Delta Lake (append-only).
+    Digunakan Anggota 4 untuk penyimpanan histori permanen.
+    """
+    delta_cols = [
+        "flight_id", "callsign", "airline_icao", "aircraft_model",
+        "registration", "origin", "destination",
+        "latitude", "longitude", "altitude_ft", "speed_kn",
+        "predicted_delay_minutes", "delay_category",
+        "capacity", "affected_passengers",
+        "fdi", "fdi_category", "estimated_compensation_eur",
+        "weather_score", "traffic_density",
+        "distance_km", "route_deviation",
+        "precipitation_mm", "wind_knots", "visibility_m", "weather_code",
+        "timestamp", "hour_utc", "flight_phase", "ingested_at"
+    ]
+    return df.select(delta_cols)
 
 
 def main():
@@ -467,7 +590,8 @@ def main():
     # ── Pipeline transformasi ───────────────────────────────
     cleaned_df  = parse_and_clean(raw_df)
     featured_df = feature_engineering(cleaned_df)
-    result_df   = predict_delay(featured_df, model)
+    delay_df    = predict_delay(featured_df, model)
+    result_df   = compute_impact_metrics(delay_df)
 
     # ── Sink 1: Redis (untuk visualisasi real-time) ─────────
     query_redis = (
@@ -494,13 +618,28 @@ def main():
     )
     print(f"[STREAM] Kafka output sink dimulai → topic: {KAFKA_TOPIC_OUT}")
 
-    # ── Sink 3: Console (debug — lihat di terminal) ─────────
+    # ── Sink 3: Delta Lake (penyimpanan histori permanen) ───
+    DELTA_PATH = "/app/delta_lake/flight_predictions"
+    delta_df = write_to_delta(result_df)
+    query_delta = (
+        delta_df.writeStream
+        .outputMode("append")
+        .format("delta")
+        .option("checkpointLocation", f"{CHECKPOINT_DIR}/delta")
+        .trigger(processingTime="10 seconds")
+        .start(DELTA_PATH)
+    )
+    print(f"[STREAM] Delta Lake sink dimulai → {DELTA_PATH}")
+
+    # ── Sink 4: Console (debug — lihat di terminal) ─────────
     query_console = (
         result_df.select(
             "flight_id", "callsign", "airline_icao",
             "origin", "destination",
             "altitude_ft", "speed_kn",
-            "predicted_delay_minutes", "delay_category"
+            "predicted_delay_minutes", "delay_category",
+            "fdi", "fdi_category", "affected_passengers",
+            "estimated_compensation_eur"
         )
         .writeStream
         .outputMode("append")
@@ -523,6 +662,7 @@ def main():
     finally:
         query_redis.stop()
         query_kafka.stop()
+        query_delta.stop()
         query_console.stop()
         spark.stop()
         print("[INFO] SparkSession ditutup.")

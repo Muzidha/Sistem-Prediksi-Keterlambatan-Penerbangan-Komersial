@@ -16,6 +16,15 @@ data/
 Spark/checkpoint_spark/
 Spark/model_keterlambatan/
 
+# Delta Lake storage (Anggota 4)
+delta_lake/
+
+# Backend runtime artifacts
+Backend/__pycache__/
+Backend/*.pyc
+Backend/.venv/
+Backend/venv/
+
 # IDE
 .vscode/
 .idea/

@@ -27,6 +27,6 @@ echo "============================================="
 
 exec spark-submit \
     --master "local[*]" \
-    --packages "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0" \
+    --packages "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,io.delta:delta-spark_2.12:3.0.0" \
     --conf "spark.sql.shuffle.partitions=4" \
     spark_processor.py
