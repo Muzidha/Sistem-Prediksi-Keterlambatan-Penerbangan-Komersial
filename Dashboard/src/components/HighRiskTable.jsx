@@ -1,6 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { ChevronUp, ChevronDown } from 'lucide-react';
 
 const HighRiskTable = ({ alerts }) => {
+  const [isExpanded, setIsExpanded] = useState(true);
   // Sort alerts by FDI descending
   const sortedAlerts = [...(alerts || [])].sort((a, b) => {
     return parseFloat(b.fdi || 0) - parseFloat(a.fdi || 0);
@@ -23,20 +25,31 @@ const HighRiskTable = ({ alerts }) => {
   };
 
   return (
-    <div className="glass-panel">
-      <div className="panel-header">
-        <span className="status-indicator"></span>
-        High-Risk Flights & Ripple Effect
+    <div className="glass-panel" style={{ padding: '1rem', transition: 'all 0.3s' }}>
+      <div 
+        className="panel-header" 
+        style={{ cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: 0, paddingBottom: isExpanded ? '1rem' : '0' }}
+        onClick={() => setIsExpanded(!isExpanded)}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <span className="status-indicator"></span>
+          High-Risk Flights & Ripple Effect
+        </div>
+        <button className="btn-demo" style={{ padding: '4px 10px', fontSize: '0.75rem', background: 'transparent', borderColor: 'var(--panel-border)' }}>
+          {isExpanded ? <><ChevronDown size={14}/> HIDE</> : <><ChevronUp size={14}/> SHOW</>}
+        </button>
       </div>
       
-      <div className="table-container">
-        <table className="data-table">
+      {isExpanded && (
+        <div className="table-container" style={{ maxHeight: '30vh', overflowY: 'auto' }}>
+          <table className="data-table">
           <thead>
             <tr>
               <th>Callsign</th>
               <th>Airline</th>
               <th>Route</th>
               <th>Pred. Delay</th>
+              <th>Est. Comp.</th>
               <th>FDI</th>
               <th>Ripple Effect Score</th>
             </tr>
@@ -44,7 +57,7 @@ const HighRiskTable = ({ alerts }) => {
           <tbody>
             {sortedAlerts.length === 0 ? (
               <tr>
-                <td colSpan="6" style={{ textAlign: 'center', color: 'var(--color-green)', padding: '2rem' }}>
+                <td colSpan="7" style={{ textAlign: 'center', color: 'var(--color-green)', padding: '2rem' }}>
                   Tidak ada penerbangan berisiko tinggi saat ini.
                 </td>
               </tr>
@@ -56,6 +69,11 @@ const HighRiskTable = ({ alerts }) => {
                   <td>{flight.origin} → {flight.destination}</td>
                   <td>
                     {parseFloat(flight.predicted_delay_minutes).toFixed(1)} m
+                  </td>
+                  <td>
+                    <span style={{ fontWeight: 600, color: 'var(--color-blue)' }}>
+                      €{Number(flight.estimated_compensation_eur || 0).toLocaleString()}
+                    </span>
                   </td>
                   <td>
                     <span className={`badge ${parseFloat(flight.fdi) >= 30 ? 'red' : 'amber'}`}>
@@ -78,6 +96,7 @@ const HighRiskTable = ({ alerts }) => {
           </tbody>
         </table>
       </div>
+      )}
     </div>
   );
 };

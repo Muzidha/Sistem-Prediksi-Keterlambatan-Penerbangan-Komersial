@@ -1,5 +1,47 @@
 import React from 'react';
 
+const airlineNames = {
+  'GIA': 'Garuda Indonesia',
+  'LNI': 'Lion Air',
+  'CTV': 'Citilink',
+  'BTK': 'Batik Air',
+  'SJW': 'Super Air Jet',
+  'AXM': 'AirAsia',
+  'AWQ': 'Indonesia AirAsia',
+  'SJY': 'Sriwijaya Air',
+  'NAM': 'NAM Air',
+  'TGA': 'Trigana Air',
+  'SIA': 'Singapore Airlines',
+  'MAS': 'Malaysia Airlines',
+  'THA': 'Thai Airways',
+  'JST': 'Jetstar',
+  'QFA': 'Qantas',
+  'UAE': 'Emirates',
+  'QTR': 'Qatar Airways',
+  'SVA': 'Saudia',
+  'ANA': 'All Nippon Airways',
+  'JAL': 'Japan Airlines',
+  'CPA': 'Cathay Pacific',
+  'CAL': 'China Airlines',
+  'EVA': 'EVA Air',
+  'ETH': 'Ethiopian Airlines',
+  'DKH': 'Juneyao Airlines',
+  'AIH': 'Air Incheon',
+  'TNU': 'TransNusa',
+  'FFM': 'Firefly',
+  'FIN': 'Finnair',
+  'BAW': 'British Airways',
+  'AFR': 'Air France',
+  'DLH': 'Lufthansa',
+  'KLM': 'KLM Royal Dutch Airlines',
+  'DAL': 'Delta Air Lines',
+  'AAL': 'American Airlines',
+  'UAL': 'United Airlines',
+  'THY': 'Turkish Airlines'
+};
+
+const getAirlineName = (icao) => airlineNames[icao] || 'Unknown Airline';
+
 const AirlineLeaderboard = ({ airlines }) => {
   // Sort airlines by api_score descending
   const sortedAirlines = [...(airlines || [])].sort((a, b) => {
@@ -47,7 +89,16 @@ const AirlineLeaderboard = ({ airlines }) => {
                   <td style={{ fontWeight: 'bold', color: index < 3 ? 'var(--color-amber)' : 'inherit' }}>
                     #{index + 1}
                   </td>
-                  <td style={{ fontWeight: 600 }}>{airline.airline_icao}</td>
+                  <td>
+                    <div style={{ display: 'flex', flexDirection: 'column' }}>
+                      <span style={{ fontWeight: 600, color: 'var(--color-blue)', fontSize: '0.9rem' }}>
+                        {getAirlineName(airline.airline_icao)}
+                      </span>
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                        ICAO: {airline.airline_icao}
+                      </span>
+                    </div>
+                  </td>
                   <td>{airline.total_flights}</td>
                   <td>
                     <div style={{display: 'flex', alignItems: 'center', gap: '8px'}}>

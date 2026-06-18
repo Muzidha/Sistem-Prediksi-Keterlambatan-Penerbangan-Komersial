@@ -47,7 +47,8 @@ function App() {
                 res: (80 + i * 2).toFixed(1),
                 res_category: 'CRITICAL',
                 predicted_delay_minutes: (120 + i * 15).toFixed(1),
-                fdi_category: 'CRITICAL'
+                fdi_category: 'CRITICAL',
+                estimated_compensation_eur: (300000 + i * 45000)
               }));
               
               payload.alerts = mockAlerts;
@@ -101,37 +102,47 @@ function App() {
   };
 
   return (
-    <div className="dashboard-container">
-      <div className="top-bar">
-        <h1>
-          ✈️ GLOBESYNC REAL-TIME OPS
-          <span className={`status-indicator ${connected ? 'pulsing' : 'offline'}`} title={connected ? "Connected to live feed" : "Disconnected"}></span>
-        </h1>
-        <div style={{ display: 'flex', gap: '1rem' }}>
-          <button 
-            className="btn-demo" 
-            style={{ background: 'rgba(59, 130, 246, 0.1)', color: 'var(--color-blue)', borderColor: 'rgba(59, 130, 246, 0.5)' }} 
-            onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')}
-          >
-            {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
-            {theme === 'dark' ? 'LIGHT MODE' : 'DARK MODE'}
-          </button>
-          <button className="btn-demo" onClick={triggerBadWeatherDemo}>
-            <CloudLightning size={16} />
-            INJECT WEATHER ANOMALY
-          </button>
-        </div>
-      </div>
-
-      <KPIHeader impact={data.impact} stats={data.stats} />
-
-      <div className="main-grid">
+    <div className="dashboard-wrapper">
+      <div className="map-background">
         <LiveMap theme={theme} flights={demoMode ? [...data.flights, ...(data.alerts || [])] : data.flights} />
-        <AirlineLeaderboard airlines={data.airlines} />
       </div>
 
-      <div className="bottom-grid">
-        <HighRiskTable alerts={data.alerts} />
+      <div className="overlay-ui">
+        <div className="top-bar">
+          <h1>
+            ✈️ GLOBESYNC REAL-TIME OPS
+            <span className={`status-indicator ${connected ? 'pulsing' : 'offline'}`} title={connected ? "Connected to live feed" : "Disconnected"}></span>
+          </h1>
+          <div style={{ display: 'flex', gap: '1rem' }}>
+            <button 
+              className="btn-demo" 
+              style={{ background: 'rgba(59, 130, 246, 0.1)', color: 'var(--color-blue)', borderColor: 'rgba(59, 130, 246, 0.5)' }} 
+              onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')}
+            >
+              {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+              {theme === 'dark' ? 'LIGHT MODE' : 'DARK MODE'}
+            </button>
+            <button className="btn-demo" onClick={triggerBadWeatherDemo}>
+              <CloudLightning size={16} />
+              INJECT WEATHER ANOMALY
+            </button>
+          </div>
+        </div>
+
+        <div className="main-layout" style={{ flex: 1, overflow: 'hidden' }}>
+          <div className="left-column">
+            <KPIHeader impact={data.impact} stats={data.stats} />
+          </div>
+
+          <div className="right-column">
+            <AirlineLeaderboard airlines={data.airlines} />
+          </div>
+        </div>
+
+        {/* Bottom Full Width Table */}
+        <div style={{ pointerEvents: 'auto', marginTop: '1rem', width: '100%' }}>
+          <HighRiskTable alerts={data.alerts} />
+        </div>
       </div>
     </div>
   );
