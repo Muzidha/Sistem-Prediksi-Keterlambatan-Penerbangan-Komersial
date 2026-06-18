@@ -22,7 +22,7 @@ const AirlineLeaderboard = ({ airlines }) => {
         Airline Performance Index
       </div>
       
-      <div style={{ overflowX: 'auto' }}>
+      <div className="table-container">
         <table className="data-table">
           <thead>
             <tr>

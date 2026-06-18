@@ -19,6 +19,14 @@ Akses backend API:
 curl http://localhost:8000/
 ```
 
+Menjalankan Dashboard (Frontend):
+```bash
+cd Dashboard
+npm install
+npm run dev
+```
+Buka browser dan akses dashboard pada: `http://localhost:5173/`
+
 ---
 
 ## Arsitektur Sistem
@@ -215,3 +223,4 @@ curl http://localhost:8000/api/airlines/AXM
 | Anggota 2 | Spark streaming & ML inference |
 | Anggota 3 | ML features & RandomForestRegressor |
 | Anggota 4 | Delta Lake, Redis alerts, FastAPI + WebSocket, FDI, RES, API |
+| Anggota 5 | Dashboard React, Tema Enterprise, UI/UX Real-time FR24 Style |

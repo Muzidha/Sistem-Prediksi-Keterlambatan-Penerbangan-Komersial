@@ -29,7 +29,7 @@ const HighRiskTable = ({ alerts }) => {
         High-Risk Flights & Ripple Effect
       </div>
       
-      <div style={{ overflowX: 'auto' }}>
+      <div className="table-container">
         <table className="data-table">
           <thead>
             <tr>
