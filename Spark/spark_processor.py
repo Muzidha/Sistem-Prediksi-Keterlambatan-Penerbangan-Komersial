@@ -117,13 +117,12 @@ def read_kafka_stream(spark):
     )
 
 
-def parse_and_clean(raw_df):
+def parse_json(raw_df):
     """
-    Step 1: Parse JSON dari kolom 'value' Kafka.
-    Step 2: Data Cleaning — buang baris dengan field kritis kosong,
-            filter nilai tidak masuk akal.
+    Step 1 (Bronze): Parse JSON dari kolom 'value' Kafka.
+    Hanya parsing + flatten weather struct, TANPA cleaning.
+    Output ini langsung masuk ke Bronze layer.
     """
-    # Parse JSON
     parsed = (
         raw_df
         .select(
@@ -134,13 +133,25 @@ def parse_and_clean(raw_df):
     )
 
     # Flatten nested weather struct
-    cleaned = (
+    flattened = (
         parsed
         .withColumn("precipitation_mm", F.col("weather.precipitation_mm"))
         .withColumn("wind_knots",        F.col("weather.wind_knots"))
         .withColumn("visibility_m",      F.col("weather.visibility_m"))
         .withColumn("weather_code",      F.col("weather.weather_code"))
         .drop("weather")
+    )
+    return flattened
+
+
+def clean_data(parsed_df):
+    """
+    Step 2 (Silver): Data Cleaning — buang baris dengan field
+    kritis kosong, filter nilai tidak masuk akal, isi null.
+    Input: output dari parse_json (Bronze data).
+    """
+    cleaned = (
+        parsed_df
         # ── Data Cleaning ──────────────────────────────────
         # Buang baris yang field pentingnya null
         .filter(F.col("flight_id").isNotNull())
@@ -545,12 +556,35 @@ def write_to_kafka_out(df):
     return kafka_out
 
 
-def write_to_delta(df):
+def write_to_bronze(df):
     """
-    Menyimpan hasil prediksi ke Delta Lake (append-only).
-    Digunakan Anggota 4 untuk penyimpanan histori permanen.
+    🥉 Bronze Layer — Raw parsed data dari Kafka.
+    Tidak ada cleaning/enrichment. Berfungsi sebagai arsip
+    untuk replay jika ada bug di Silver.
+    Partisi: ingestion_date
     """
-    delta_cols = [
+    bronze_cols = [
+        "flight_id", "callsign", "airline_icao", "aircraft_model",
+        "registration", "origin", "destination",
+        "latitude", "longitude", "altitude_ft", "speed_kn",
+        "heading_deg", "on_ground", "timestamp",
+        "precipitation_mm", "wind_knots", "visibility_m", "weather_code",
+        "ingested_at"
+    ]
+    return (
+        df.select(bronze_cols)
+        .withColumn("ingestion_date",
+            F.to_date(F.from_unixtime(F.col("timestamp"))))
+    )
+
+
+def write_to_silver(df):
+    """
+    🥈 Silver Layer — Cleaned + enriched + ML predictions.
+    Single source of truth untuk analisis dan Gold aggregation.
+    Partisi: processing_date
+    """
+    silver_cols = [
         "flight_id", "callsign", "airline_icao", "aircraft_model",
         "registration", "origin", "destination",
         "latitude", "longitude", "altitude_ft", "speed_kn",
@@ -562,12 +596,16 @@ def write_to_delta(df):
         "precipitation_mm", "wind_knots", "visibility_m", "weather_code",
         "timestamp", "hour_utc", "flight_phase", "ingested_at"
     ]
-    return df.select(delta_cols)
+    return (
+        df.select(silver_cols)
+        .withColumn("processing_date", F.current_date())
+    )
 
 
 def main():
     print("=" * 60)
     print("  SPARK FLIGHT DELAY PREDICTION — Starting...")
+    print("  Medallion Architecture: Bronze → Silver → Gold")
     print("=" * 60)
 
     spark = create_spark_session()
@@ -587,8 +625,11 @@ def main():
     # ── Baca dari Kafka ─────────────────────────────────────
     raw_df = read_kafka_stream(spark)
 
-    # ── Pipeline transformasi ───────────────────────────────
-    cleaned_df  = parse_and_clean(raw_df)
+    # ── Parse JSON (input untuk Bronze & Silver) ────────────
+    parsed_df = parse_json(raw_df)
+
+    # ── Pipeline Silver: Clean → Feature Eng → ML ───────────
+    cleaned_df  = clean_data(parsed_df)
     featured_df = feature_engineering(cleaned_df)
     delay_df    = predict_delay(featured_df, model)
     result_df   = compute_impact_metrics(delay_df)
@@ -599,10 +640,10 @@ def main():
         .outputMode("append")
         .foreachBatch(write_to_redis)
         .option("checkpointLocation", f"{CHECKPOINT_DIR}/redis")
-        .trigger(processingTime="10 seconds")   # proses tiap 10 detik
+        .trigger(processingTime="10 seconds")
         .start()
     )
-    print("[STREAM] Redis sink dimulai.")
+    print("[STREAM] Sink 1 — Redis (real-time) dimulai.")
 
     # ── Sink 2: Kafka topic baru flight-predictions ─────────
     kafka_out_df = write_to_kafka_out(result_df)
@@ -616,22 +657,37 @@ def main():
         .trigger(processingTime="10 seconds")
         .start()
     )
-    print(f"[STREAM] Kafka output sink dimulai → topic: {KAFKA_TOPIC_OUT}")
+    print(f"[STREAM] Sink 2 — Kafka output → topic: {KAFKA_TOPIC_OUT}")
 
-    # ── Sink 3: Delta Lake (penyimpanan histori permanen) ───
-    DELTA_PATH = "/app/delta_lake/flight_predictions"
-    delta_df = write_to_delta(result_df)
-    query_delta = (
-        delta_df.writeStream
+    # ── Sink 3: Delta Lake BRONZE (raw parsed data) ─────────
+    BRONZE_PATH = "/app/delta_lake/bronze/raw_flights"
+    bronze_df = write_to_bronze(parsed_df)
+    query_bronze = (
+        bronze_df.writeStream
         .outputMode("append")
         .format("delta")
-        .option("checkpointLocation", f"{CHECKPOINT_DIR}/delta")
+        .option("checkpointLocation", f"{CHECKPOINT_DIR}/delta_bronze")
+        .partitionBy("ingestion_date")
         .trigger(processingTime="10 seconds")
-        .start(DELTA_PATH)
+        .start(BRONZE_PATH)
     )
-    print(f"[STREAM] Delta Lake sink dimulai → {DELTA_PATH}")
+    print(f"[STREAM] Sink 3 — 🥉 Delta BRONZE → {BRONZE_PATH}")
 
-    # ── Sink 4: Console (debug — lihat di terminal) ─────────
+    # ── Sink 4: Delta Lake SILVER (enriched + ML) ───────────
+    SILVER_PATH = "/app/delta_lake/silver/enriched_flights"
+    silver_df = write_to_silver(result_df)
+    query_silver = (
+        silver_df.writeStream
+        .outputMode("append")
+        .format("delta")
+        .option("checkpointLocation", f"{CHECKPOINT_DIR}/delta_silver")
+        .partitionBy("processing_date")
+        .trigger(processingTime="10 seconds")
+        .start(SILVER_PATH)
+    )
+    print(f"[STREAM] Sink 4 — 🥈 Delta SILVER → {SILVER_PATH}")
+
+    # ── Sink 5: Console (debug — lihat di terminal) ─────────
     query_console = (
         result_df.select(
             "flight_id", "callsign", "airline_icao",
@@ -650,9 +706,11 @@ def main():
         .trigger(processingTime="10 seconds")
         .start()
     )
-    print("[STREAM] Console sink dimulai (debug).")
+    print("[STREAM] Sink 5 — Console (debug) dimulai.")
 
-    print("\n[INFO] Semua stream berjalan. Tekan Ctrl+C untuk berhenti.\n")
+    print("\n[INFO] Semua stream berjalan (5 sinks).")
+    print("[INFO] Medallion: Bronze ✅ | Silver ✅ | Gold → jalankan delta_aggregator.py")
+    print("[INFO] Tekan Ctrl+C untuk berhenti.\n")
 
     # Tunggu sampai semua query selesai / ada error
     try:
@@ -662,7 +720,8 @@ def main():
     finally:
         query_redis.stop()
         query_kafka.stop()
-        query_delta.stop()
+        query_bronze.stop()
+        query_silver.stop()
         query_console.stop()
         spark.stop()
         print("[INFO] SparkSession ditutup.")

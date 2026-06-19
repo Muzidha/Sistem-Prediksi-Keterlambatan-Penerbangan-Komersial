@@ -19,9 +19,10 @@ COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
 # Copy source code
-COPY spark_processor.py /app/spark_processor.py
-COPY train_model.py     /app/train_model.py
-COPY entrypoint.sh      /app/entrypoint.sh
+COPY spark_processor.py  /app/spark_processor.py
+COPY train_model.py      /app/train_model.py
+COPY delta_aggregator.py /app/delta_aggregator.py
+COPY entrypoint.sh       /app/entrypoint.sh
 
 # Fix Windows CRLF line endings → Unix LF (penting!)
 RUN dos2unix /app/entrypoint.sh && chmod +x /app/entrypoint.sh
