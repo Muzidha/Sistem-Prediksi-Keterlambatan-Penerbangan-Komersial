@@ -37,7 +37,11 @@ const airlineNames = {
   'DAL': 'Delta Air Lines',
   'AAL': 'American Airlines',
   'UAL': 'United Airlines',
-  'THY': 'Turkish Airlines'
+  'THY': 'Turkish Airlines',
+  'MWG':  'AirBorneo',
+  'VJC' : 'VietJet Air',
+  'OEY' : 'Rimbun Air',
+  'SJV' : 'Super Air Jet'
 };
 
 const getAirlineName = (icao) => airlineNames[icao] || 'Unknown Airline';
