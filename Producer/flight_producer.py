@@ -14,6 +14,7 @@ KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:29092")
 KAFKA_TOPIC     = os.getenv("KAFKA_TOPIC", "commercial-flight-stream")
 POLL_INTERVAL   = int(os.getenv("POLL_INTERVAL_SECONDS", 30))
 BOUNDS          = "6,-11,95,141"
+OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY", "7fe2acea0cac01fef802df31f7bb48a8")
 
 weather_cache = {}
 
@@ -59,6 +60,36 @@ def fetch_weather(lat, lon):
         "weather_code":     c.get("weathercode", 0),
     }
 
+def fetch_weather_openweather(lat, lon):
+    url = "https://api.openweathermap.org/data/2.5/weather"
+    params = {
+        "lat": lat, "lon": lon,
+        "appid": OPENWEATHER_API_KEY,
+        "units": "metric"
+    }
+    resp = requests.get(url, params=params, timeout=10)
+    resp.raise_for_status()
+    data = resp.json()
+    
+    wind_ms = data.get("wind", {}).get("speed", 0)
+    wind_knots = wind_ms * 1.94384
+    
+    rain_1h = data.get("rain", {}).get("1h", 0)
+    snow_1h = data.get("snow", {}).get("1h", 0)
+    precip_mm = rain_1h + snow_1h
+    
+    visibility_m = data.get("visibility", 10000)
+    
+    weather_list = data.get("weather", [])
+    weather_code = weather_list[0].get("id", 0) if weather_list else 0
+    
+    return {
+        "precipitation_mm": precip_mm,
+        "wind_knots":       round(wind_knots, 2),
+        "visibility_m":     visibility_m,
+        "weather_code":     weather_code,
+    }
+
 def get_weather_cached(lat, lon):
     # Round coordinates to 1 decimal place (~11 km) to reuse weather data
     key = (round(lat, 1), round(lon, 1))
@@ -74,8 +105,14 @@ def get_weather_cached(lat, lon):
         weather_cache[key] = (now, w)
         return w
     except Exception as e:
-        log(f"Weather fetch failed for {key}: {e}")
-        return {}
+        log(f"Open-Meteo fetch failed for {key}: {e}. Trying OpenWeatherMap...")
+        try:
+            w = fetch_weather_openweather(lat, lon)
+            weather_cache[key] = (now, w)
+            return w
+        except Exception as e2:
+            log(f"OpenWeatherMap fetch failed for {key}: {e2}.")
+            return {}
 
 def parse_flight(flight_id, raw):
     try:
