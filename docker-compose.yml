@@ -91,6 +91,7 @@ services:
     volumes:
       # Mount folder model agar hasil training bisa dipakai
       - ./Spark/model_keterlambatan:/app/model_keterlambatan
+      - ./Spark/model_keterlambatan_kmeans:/app/model_keterlambatan_kmeans
       # Mount checkpoint agar stream bisa resume setelah restart
       - ./Spark/checkpoint_spark:/app/checkpoint_spark
       # Mount Delta Lake untuk penyimpanan histori permanen (Anggota 4)

@@ -53,6 +53,52 @@ const AIRPORTS = [
   { id: 'LHR', icao: 'EGLL', name: 'London Heathrow Airport', country: '🇬🇧', lat: 51.4700, lon: -0.4543 },
 ];
 
+const AirportWeather = ({ lat, lon }) => {
+  const [weather, setWeather] = React.useState(null);
+  
+  React.useEffect(() => {
+    fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,wind_speed_10m,weather_code`)
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.current) {
+          setWeather(data.current);
+        }
+      })
+      .catch(() => {});
+  }, [lat, lon]);
+
+  if (!weather) return <div style={{ fontSize: '0.8rem', marginTop: '6px', color: '#888' }}>Loading weather...</div>;
+
+  const getWeatherIcon = (code) => {
+    if (code <= 1) return '☀️'; // clear
+    if (code <= 3) return '⛅'; // partly cloudy
+    if (code >= 51 && code <= 69) return '🌧️'; // rain
+    if (code >= 71 && code <= 79) return '❄️'; // snow
+    if (code >= 80 && code <= 99) return '⛈️'; // storm/heavy rain
+    return '☁️';
+  };
+
+  return (
+    <div style={{ 
+      marginTop: '8px', 
+      paddingTop: '8px', 
+      borderTop: '1px solid #e5e7eb',
+      fontSize: '0.85rem',
+      display: 'grid',
+      gridTemplateColumns: '1fr 1fr',
+      gap: '4px',
+      color: '#4b5563'
+    }}>
+      <div title="Condition & Temp">
+        {getWeatherIcon(weather.weather_code)} {weather.temperature_2m}°C
+      </div>
+      <div title="Wind Speed">
+        💨 {weather.wind_speed_10m} km/h
+      </div>
+    </div>
+  );
+};
+
 const AircraftImage = ({ registration }) => {
   const [imgSrc, setImgSrc] = React.useState(null);
   
@@ -124,7 +170,7 @@ const LiveMap = ({ flights, theme }) => {
               icon={getAirportIcon()}
             >
               <Popup className="airport-popup">
-                <div style={{ textAlign: 'left' }}>
+                <div style={{ textAlign: 'left', minWidth: '150px' }}>
                   <h4 style={{ margin: '0 0 4px 0', fontSize: '0.95rem', fontWeight: '500' }}>
                     {airport.name}
                   </h4>
@@ -132,6 +178,7 @@ const LiveMap = ({ flights, theme }) => {
                     <span>{airport.country}</span>
                     <strong style={{ fontWeight: 600 }}>{airport.id} / {airport.icao}</strong>
                   </div>
+                  <AirportWeather lat={airport.lat} lon={airport.lon} />
                 </div>
               </Popup>
             </Marker>

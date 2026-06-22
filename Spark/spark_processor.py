@@ -35,6 +35,7 @@ KAFKA_TOPIC_OUT   = "flight-predictions"
 REDIS_HOST        = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT        = int(os.getenv("REDIS_PORT", 6379))
 MODEL_PATH        = os.getenv("MODEL_PATH", "./model_keterlambatan")
+KMEANS_MODEL_PATH = MODEL_PATH + "_kmeans"
 CHECKPOINT_DIR    = "./checkpoint_spark"
 
 # ─── Aircraft capacity lookup (untuk estimasi penumpang terdampak) ─
@@ -373,38 +374,38 @@ def compute_impact_metrics(df):
     return impacted
 
 
-def predict_delay(df, model=None):
+def apply_ml_models(df, rf_model=None, kmeans_model=None):
     """
-    Prediksi keterlambatan dalam MENIT (regresi).
-    - Jika model ML tersedia: gunakan PipelineModel (RandomForestRegressor)
-      → kolom 'prediction' langsung berisi predicted_delay_minutes
-    - Jika tidak: gunakan risk_score_manual * 6 sebagai estimasi menit
-
-    Kategori delay:
-      < 15 menit  → "ON TIME"
-      15–60 menit → "MEDIUM DELAY"
-      > 60 menit  → "CRITICAL DELAY"
+    Terapkan 2 Teknik Analisis Lanjutan:
+    1. Regresi (Prediksi keterlambatan dalam MENIT)
+    2. Clustering Spasial (KMeans) untuk airspace density zone
     """
-    if model is not None:
-        # Gunakan model MLlib regresi — prediction = delay_minutes
-        predictions = model.transform(df)
+    # 1. Prediksi Delay
+    if rf_model is not None:
+        predictions = rf_model.transform(df)
         result = predictions.withColumn(
             "predicted_delay_minutes",
             F.round(F.col("prediction"), 1).cast(FloatType())
         )
     else:
-        # Fallback: rule-based dari risk_score_manual
-        # risk_score_manual (0–12.5) × 6 ≈ estimasi menit delay
         result = df.withColumn(
             "predicted_delay_minutes",
             F.round(F.col("risk_score_manual") * 6.0, 1).cast(FloatType())
         )
 
-    # Tambah label kategori delay berdasarkan menit
     result = result.withColumn("delay_category",
         F.when(F.col("predicted_delay_minutes") < 15,  "ON TIME")
          .when(F.col("predicted_delay_minutes") <= 60, "MEDIUM DELAY")
          .otherwise("CRITICAL DELAY"))
+
+    # 2. Clustering Spasial
+    if kmeans_model is not None:
+        # Akan menghasilkan kolom 'spatial_cluster'
+        result = kmeans_model.transform(result)
+        if "cluster_features" in result.columns:
+            result = result.drop("cluster_features_raw", "cluster_features")
+    else:
+        result = result.withColumn("spatial_cluster", F.lit(-1))
 
     return result
 
@@ -430,7 +431,7 @@ def write_to_redis(batch_df, batch_id):
             "precipitation_mm", "wind_knots", "visibility_m",
             "weather_score", "traffic_density",
             "distance_km", "route_deviation",
-            "predicted_delay_minutes", "delay_category",
+            "predicted_delay_minutes", "delay_category", "spatial_cluster",
             "capacity", "affected_passengers",
             "fdi", "fdi_category", "estimated_compensation_eur",
             "timestamp", "risk_score_manual", "hour_utc", "flight_phase"
@@ -460,6 +461,7 @@ def write_to_redis(batch_df, batch_id):
                 "route_deviation":         f"{row['route_deviation']:.2f}",
                 "predicted_delay_minutes": f"{row['predicted_delay_minutes']:.1f}",
                 "delay_category":          row["delay_category"]  or "UNKNOWN",
+                "spatial_cluster":         str(row["spatial_cluster"] or -1),
                 "capacity":                str(row["capacity"]              or 0),
                 "affected_passengers":     str(row["affected_passengers"]   or 0),
                 "fdi":                     f"{row['fdi']:.1f}",
@@ -535,7 +537,7 @@ def write_to_kafka_out(df):
         "flight_id", "callsign", "airline_icao", "aircraft_model",
         "registration", "origin", "destination",
         "latitude", "longitude", "altitude_ft", "speed_kn",
-        "predicted_delay_minutes", "delay_category",
+        "predicted_delay_minutes", "delay_category", "spatial_cluster",
         "capacity", "affected_passengers",
         "fdi", "fdi_category", "estimated_compensation_eur",
         "weather_score", "traffic_density",
@@ -588,7 +590,7 @@ def write_to_silver(df):
         "flight_id", "callsign", "airline_icao", "aircraft_model",
         "registration", "origin", "destination",
         "latitude", "longitude", "altitude_ft", "speed_kn",
-        "predicted_delay_minutes", "delay_category",
+        "predicted_delay_minutes", "delay_category", "spatial_cluster",
         "capacity", "affected_passengers",
         "fdi", "fdi_category", "estimated_compensation_eur",
         "weather_score", "traffic_density",
@@ -611,16 +613,24 @@ def main():
     spark = create_spark_session()
 
     # ── Load model ML jika ada ──────────────────────────────
-    model = None
+    rf_model = None
     if os.path.exists(MODEL_PATH):
         try:
-            model = PipelineModel.load(MODEL_PATH)
-            print(f"[ML] Model berhasil dimuat dari: {MODEL_PATH}")
+            rf_model = PipelineModel.load(MODEL_PATH)
+            print(f"[ML] Model RF berhasil dimuat dari: {MODEL_PATH}")
         except Exception as e:
-            print(f"[ML] Gagal load model: {e} → pakai rule-based fallback")
+            print(f"[ML] Gagal load model RF: {e} → pakai rule-based fallback")
     else:
-        print(f"[ML] Model tidak ditemukan di '{MODEL_PATH}'.")
+        print(f"[ML] Model RF tidak ditemukan di '{MODEL_PATH}'.")
         print("[ML] Gunakan rule-based scoring. Jalankan train_model.py terlebih dahulu.")
+
+    kmeans_model = None
+    if os.path.exists(KMEANS_MODEL_PATH):
+        try:
+            kmeans_model = PipelineModel.load(KMEANS_MODEL_PATH)
+            print(f"[ML] Model KMeans berhasil dimuat dari: {KMEANS_MODEL_PATH}")
+        except Exception as e:
+            print(f"[ML] Gagal load model KMeans: {e}")
 
     # ── Baca dari Kafka ─────────────────────────────────────
     raw_df = read_kafka_stream(spark)
@@ -631,7 +641,7 @@ def main():
     # ── Pipeline Silver: Clean → Feature Eng → ML ───────────
     cleaned_df  = clean_data(parsed_df)
     featured_df = feature_engineering(cleaned_df)
-    delay_df    = predict_delay(featured_df, model)
+    delay_df    = apply_ml_models(featured_df, rf_model, kmeans_model)
     result_df   = compute_impact_metrics(delay_df)
 
     # ── Sink 1: Redis (untuk visualisasi real-time) ─────────
@@ -693,7 +703,7 @@ def main():
             "flight_id", "callsign", "airline_icao",
             "origin", "destination",
             "altitude_ft", "speed_kn",
-            "predicted_delay_minutes", "delay_category",
+            "predicted_delay_minutes", "delay_category", "spatial_cluster",
             "fdi", "fdi_category", "affected_passengers",
             "estimated_compensation_eur"
         )

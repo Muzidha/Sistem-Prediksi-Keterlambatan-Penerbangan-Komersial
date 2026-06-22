@@ -28,6 +28,7 @@ from pyspark.ml.feature import (
     VectorAssembler, StandardScaler
 )
 from pyspark.ml.regression import RandomForestRegressor
+from pyspark.ml.clustering import KMeans
 from pyspark.ml.evaluation import RegressionEvaluator
 
 MODEL_PATH = os.getenv("MODEL_PATH", "./model_keterlambatan")
@@ -95,6 +96,8 @@ def generate_synthetic_data(spark, n_samples=50000):
         StructField("distance_km",       FloatType(),   False),
         StructField("route_deviation",   FloatType(),   False),
         StructField("delay_minutes",     FloatType(),   False),
+        StructField("latitude",          FloatType(),   False),
+        StructField("longitude",         FloatType(),   False),
     ])
 
     # Bobot delay per aircraft (beberapa model lebih tua / kurang reliabel)
@@ -143,6 +146,10 @@ def generate_synthetic_data(spark, n_samples=50000):
         distance_km     = round(random.uniform(200, 5000), 1)
         route_deviation = round(max(0.0, random.gauss(5, 10)), 2)
 
+        # Koordinat acak di atas Indonesia
+        latitude = round(random.uniform(-11.0, 6.0), 4)
+        longitude = round(random.uniform(95.0, 141.0), 4)
+
         # ── Hitung delay_minutes (target regresi) ─────────
         delay = random.gauss(5, 8)  # base delay
 
@@ -189,6 +196,7 @@ def generate_synthetic_data(spark, n_samples=50000):
             altitude, speed, heading, hour, dow,
             weather_score, traffic_density, distance_km,
             route_deviation, delay,
+            latitude, longitude,
         ))
 
     df = spark.createDataFrame(rows, schema)
@@ -331,6 +339,30 @@ def build_pipeline():
         rf,
     ])
 
+def build_kmeans_pipeline():
+    """
+    ML Pipeline untuk clustering spasial:
+      Membagi pesawat ke dalam zona/cluster berdasarkan lokasi & ketinggian.
+    """
+    assembler = VectorAssembler(
+        inputCols=["latitude", "longitude", "altitude_ft"],
+        outputCol="cluster_features_raw",
+        handleInvalid="skip"
+    )
+    scaler = StandardScaler(
+        inputCol="cluster_features_raw",
+        outputCol="cluster_features",
+        withMean=True,
+        withStd=True
+    )
+    kmeans = KMeans(
+        featuresCol="cluster_features",
+        predictionCol="spatial_cluster",
+        k=8,  # Membagi wilayah Indonesia ke dalam 8 zona spasial
+        seed=42
+    )
+    return Pipeline(stages=[assembler, scaler, kmeans])
+
 
 def main():
     print("=" * 60)
@@ -414,10 +446,21 @@ def main():
             .alias("p90_abs_error"),
     ).show(truncate=False)
 
-    # 6. Simpan model
-    print(f"\n[SAVE] Menyimpan model ke: {MODEL_PATH}")
+    # 6. Simpan model Regresi
+    print(f"\n[SAVE] Menyimpan model Regresi ke: {MODEL_PATH}")
     model.write().overwrite().save(MODEL_PATH)
-    print(f"[SAVE] Model tersimpan! ✓")
+    print(f"[SAVE] Model Regresi tersimpan! ✓")
+
+    # 7. Training & Simpan Model KMeans
+    print("\n[5/5] Training KMeans Spatial Clustering...")
+    kmeans_pipeline = build_kmeans_pipeline()
+    kmeans_model = kmeans_pipeline.fit(train_df)
+    
+    KMEANS_MODEL_PATH = MODEL_PATH + "_kmeans"
+    print(f"[SAVE] Menyimpan model KMeans ke: {KMEANS_MODEL_PATH}")
+    kmeans_model.write().overwrite().save(KMEANS_MODEL_PATH)
+    print(f"[SAVE] Model KMeans tersimpan! ✓")
+
     print("\nSekarang jalankan spark_processor.py untuk streaming inference.")
 
     spark.stop()
