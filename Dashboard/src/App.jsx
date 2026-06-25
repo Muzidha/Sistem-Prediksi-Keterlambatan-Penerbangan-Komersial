@@ -48,7 +48,8 @@ function App() {
                 res_category: 'CRITICAL',
                 predicted_delay_minutes: (120 + i * 15).toFixed(1),
                 fdi_category: 'CRITICAL',
-                estimated_compensation_eur: (300000 + i * 45000)
+                estimated_compensation_eur: (300000 + i * 45000),
+                affected_passengers: (180 + i * 45)
               }));
               
               payload.alerts = mockAlerts;

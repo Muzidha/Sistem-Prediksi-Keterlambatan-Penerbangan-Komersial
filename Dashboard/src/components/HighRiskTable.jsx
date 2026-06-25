@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
 import { ChevronUp, ChevronDown } from 'lucide-react';
+import { getAirlineName } from './AirlineLeaderboard';
 
 const HighRiskTable = ({ alerts }) => {
   const [isExpanded, setIsExpanded] = useState(true);
+  const [searchIcao, setSearchIcao] = useState('');
   // Sort alerts by FDI descending
   const sortedAlerts = [...(alerts || [])].sort((a, b) => {
     return parseFloat(b.fdi || 0) - parseFloat(a.fdi || 0);
@@ -35,9 +37,35 @@ const HighRiskTable = ({ alerts }) => {
           <span className="status-indicator"></span>
           High-Risk Flights & Ripple Effect
         </div>
-        <button className="btn-demo" style={{ padding: '4px 10px', fontSize: '0.75rem', background: 'transparent', borderColor: 'var(--panel-border)' }}>
-          {isExpanded ? <><ChevronDown size={14}/> HIDE</> : <><ChevronUp size={14}/> SHOW</>}
-        </button>
+        
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }} onClick={(e) => e.stopPropagation()}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <input
+              type="text"
+              placeholder="Cari ICAO..."
+              value={searchIcao}
+              onChange={(e) => setSearchIcao(e.target.value.toUpperCase())}
+              maxLength={3}
+              style={{
+                padding: '4px 8px',
+                borderRadius: '4px',
+                border: '1px solid rgba(255,255,255,0.2)',
+                background: 'rgba(0,0,0,0.2)',
+                color: 'var(--text-primary)',
+                width: '100px',
+                fontSize: '0.8rem'
+              }}
+            />
+            {searchIcao.length > 0 && (
+              <span style={{ fontSize: '0.8rem', color: 'var(--color-blue)', fontWeight: 600 }}>
+                {getAirlineName(searchIcao)}
+              </span>
+            )}
+          </div>
+          <button className="btn-demo" style={{ padding: '4px 10px', fontSize: '0.75rem', background: 'transparent', borderColor: 'var(--panel-border)' }} onClick={() => setIsExpanded(!isExpanded)}>
+            {isExpanded ? <><ChevronDown size={14}/> HIDE</> : <><ChevronUp size={14}/> SHOW</>}
+          </button>
+        </div>
       </div>
       
       {isExpanded && (
@@ -50,6 +78,7 @@ const HighRiskTable = ({ alerts }) => {
               <th>Route</th>
               <th>Pred. Delay</th>
               <th>Est. Comp.</th>
+              <th>Pelanggan Terdampak</th>
               <th>FDI</th>
               <th>Ripple Effect Score</th>
             </tr>
@@ -57,7 +86,7 @@ const HighRiskTable = ({ alerts }) => {
           <tbody>
             {sortedAlerts.length === 0 ? (
               <tr>
-                <td colSpan="7" style={{ textAlign: 'center', color: 'var(--color-green)', padding: '2rem' }}>
+                <td colSpan="8" style={{ textAlign: 'center', color: 'var(--color-green)', padding: '2rem' }}>
                   Tidak ada penerbangan berisiko tinggi saat ini.
                 </td>
               </tr>
@@ -74,6 +103,9 @@ const HighRiskTable = ({ alerts }) => {
                     <span style={{ fontWeight: 600, color: 'var(--color-blue)' }}>
                       €{Number(flight.estimated_compensation_eur || 0).toLocaleString()}
                     </span>
+                  </td>
+                  <td style={{ color: 'var(--color-red)', fontWeight: '600' }}>
+                    {flight.affected_passengers ? Number(flight.affected_passengers).toLocaleString() : 0}
                   </td>
                   <td>
                     <span className={`badge ${parseFloat(flight.fdi) >= 30 ? 'red' : 'amber'}`}>

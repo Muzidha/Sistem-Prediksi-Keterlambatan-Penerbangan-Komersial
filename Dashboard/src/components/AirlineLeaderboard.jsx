@@ -1,6 +1,6 @@
 import React from 'react';
 
-const airlineNames = {
+export const airlineNames = {
   // ── Maskapai Indonesia (yang sudah ada) ──────────────────────────
   'GIA': 'Garuda Indonesia',
   'LNI': 'Lion Air',
@@ -112,7 +112,7 @@ const airlineNames = {
   'BBL' : 'BBN Airlines Indonesia'
 };
 
-const getAirlineName = (icao) => airlineNames[icao] || 'Unknown Airline';
+export const getAirlineName = (icao) => airlineNames[icao] || 'Unknown Airline';
 
 const AirlineLeaderboard = ({ airlines }) => {
   // Sort airlines by api_score descending
