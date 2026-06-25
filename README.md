@@ -1,5 +1,11 @@
 # Sistem-Prediksi-Keterlambatan-Penerbangan-Komersial
 
+<img width="1918" height="903" alt="image" src="https://github.com/user-attachments/assets/387dd7ed-59df-42c6-b7eb-19226bc0262d" />
+
+
+<img width="1918" height="903" alt="image" src="https://github.com/user-attachments/assets/c7797b8a-6294-4fdd-844f-c9c313e617f3" />
+
+
 Sistem big data real-time untuk memprediksi keterlambatan penerbangan komersial dan mengukur dampaknya terhadap jaringan penerbangan, penumpang, serta biaya maskapai.
 
 ## Quick Start
