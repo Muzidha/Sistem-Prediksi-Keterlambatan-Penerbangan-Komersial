@@ -1,9 +1,8 @@
 # Sistem-Prediksi-Keterlambatan-Penerbangan-Komersial
 
-<img width="1918" height="903" alt="image" src="https://github.com/user-attachments/assets/387dd7ed-59df-42c6-b7eb-19226bc0262d" />
+![Dashboard Utama](./img/dashboard.png)
 
-
-<img width="1919" height="877" alt="image" src="https://github.com/user-attachments/assets/49e09df7-8532-4c2a-ac65-e798298df326" />
+![Dashboard Analitik](./img/DELTA.png)
 
 
 
@@ -39,7 +38,7 @@ Buka browser dan akses dashboard pada: `http://localhost:5173/`
 ## Arsitektur Sistem
 
 ```
-FlightRadar24 API  +  Open-Meteo API (cuaca)
+FlightRadar24 API  +  Open-Meteo API & Bright Sky API (cuaca)
         ↓
    flight-producer (Producer/)
         ↓
@@ -71,7 +70,7 @@ Rancangan awal difokuskan pada **prediksi keterlambatan penerbangan** dengan ars
 
 | Aspek | Rancangan Awal |
 |-------|----------------|
-| **Sumber data** | FlightRadar24 real-time + cuaca Open-Meteo |
+| **Sumber data** | FlightRadar24 real-time + cuaca Open-Meteo & Bright Sky (Fallback) |
 | **ML model** | RandomForestRegressor untuk memprediksi `delay_minutes` |
 | **Output** | `predicted_delay_minutes` dan `delay_category` (ON TIME / MEDIUM / CRITICAL) |
 | **Storage** | Redis untuk real-time, Kafka untuk downstream |

@@ -1,9 +1,7 @@
 # Justifikasi Masalah & Kebutuhan Big Data
 ### Sistem Prediksi Keterlambatan Penerbangan Komersial
 
-> Dokumen ini melengkapi `README.md` utama. Isinya: bukti kuantitatif bahwa masalah keterlambatan penerbangan nyata dan belum terselesaikan, kerangka 5V yang menjustifikasi pendekatan Big Data, dan analisis gap terhadap solusi yang sudah ada di pasaran.
-
----
+--
 
 ## 1. Masalah, Dibuktikan dengan Data
 
@@ -47,22 +45,9 @@
 
 **Gap yang coba ditutup:** layanan prediksi delay yang sudah ada umumnya hanya melaporkan estimasi delay itu sendiri, tanpa mengukur **dampak lanjutannya** terhadap jaringan penerbangan, penumpang, dan biaya operasional maskapai secara transparan dan real-time. Diferensiasi sistem ini ada di lapisan metrik turunan (FDI, RES, estimasi biaya, ranking maskapai), bukan semata akurasi prediksi delay.
 
-⚠️ **Catatan jujur:** tabel di atas disusun dari pengetahuan umum tentang positioning produk-produk tersebut, bukan dari uji langsung berdampingan (head-to-head benchmark). Untuk laporan akhir yang lebih kuat, idealnya dilakukan pengecekan langsung ke situs/dokumentasi resmi tiap kompetitor.
 
 ---
 
-## 4. Data yang Masih Dibutuhkan & Cara Mendapatkannya
-
-Bagian ini transparan soal apa yang **belum** terintegrasi, supaya tidak diklaim sebagai sudah selesai saat sesi tanya-jawab.
-
-| Data yang dibutuhkan | Kenapa penting | Cara mendapatkan |
-|---|---|---|
-| **Data OTP historis resmi per maskapai/rute** | Untuk melatih model dengan ground truth nyata (saat ini training pakai data sintetis) | Kemenhub via `sisfoangud.dephub.go.id`, atau API berbayar seperti OAG / Cirium yang menyediakan data OTP historis terstruktur |
-| **NOTAM (Notice to Airmen) resmi** | Indikator gangguan operasional bandara/rute yang memengaruhi delay | AIM Indonesia (AirNav Indonesia) atau FAA NOTAM API untuk referensi internasional |
-| **Kondisi runway real-time** (kepadatan, closure, maintenance) | Faktor langsung penyebab delay yang belum masuk model | AirNav Indonesia / data ATC, biasanya perlu kerja sama institusional |
-| **Jadwal rotasi pesawat resmi (bukan hasil tracking)** | Saat ini RES dihitung dari hasil pengamatan posisi pesawat (Redis sorted set), bukan jadwal resmi maskapai | API maskapai (jika tersedia), atau OAG Schedules — umumnya berbayar |
-| **Data harga tiket & load factor aktual** | Saat ini load factor memakai asumsi tetap 0,85, belum dari data riil | Data maskapai langsung atau API agregator tiket (umumnya tidak terbuka gratis) |
-| **Validasi independen hasil prediksi vs delay aktual** | Untuk mengukur akurasi model di dunia nyata, bukan hanya RMSE/MAE pada data sintetis | Bandingkan output sistem dengan data realisasi dari Kemenhub/laporan maskapai pasca-penerbangan |
 
 **Status sumber data saat ini yang sudah berjalan (gratis, real-time, tanpa API key berbayar):**
 - FlightRadar24 feed publik (`data-cloud.flightradar24.com`) — posisi pesawat real-time
