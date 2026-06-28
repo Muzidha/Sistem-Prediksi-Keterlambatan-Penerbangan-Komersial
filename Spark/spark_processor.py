@@ -494,12 +494,15 @@ def write_to_redis(batch_df, batch_id):
                              if r["delay_category"] == "CRITICAL DELAY")
         high_fdi_count = sum(1 for r in rows
                              if r["fdi_category"] in ("HIGH", "CRITICAL"))
+        delayed_rows = [r for r in rows if r["delay_category"] in ("MEDIUM DELAY", "CRITICAL DELAY")]
         avg_delay = (sum(r["predicted_delay_minutes"] or 0 for r in rows)
                      / max(len(rows), 1))
-        avg_fdi = (sum(r["fdi"] or 0 for r in rows)
-                   / max(len(rows), 1))
-        total_passengers = sum(r["affected_passengers"] or 0 for r in rows)
-        total_compensation = sum(r["estimated_compensation_eur"] or 0 for r in rows)
+        
+        fdi_values = [r["fdi"] for r in delayed_rows]
+        avg_fdi = sum(fdi_values) / max(len(fdi_values), 1) if fdi_values else 0.0
+        
+        total_passengers = sum(r["affected_passengers"] or 0 for r in delayed_rows)
+        total_compensation = sum(r["estimated_compensation_eur"] or 0 for r in delayed_rows)
 
         stats = {
             "batch_id":                    str(batch_id),
@@ -614,7 +617,7 @@ def main():
 
     # ── Load model ML jika ada ──────────────────────────────
     rf_model = None
-    if os.path.exists(MODEL_PATH):
+    if os.path.exists(os.path.join(MODEL_PATH, "metadata")):
         try:
             rf_model = PipelineModel.load(MODEL_PATH)
             print(f"[ML] Model RF berhasil dimuat dari: {MODEL_PATH}")
@@ -625,7 +628,7 @@ def main():
         print("[ML] Gunakan rule-based scoring. Jalankan train_model.py terlebih dahulu.")
 
     kmeans_model = None
-    if os.path.exists(KMEANS_MODEL_PATH):
+    if os.path.exists(os.path.join(KMEANS_MODEL_PATH, "metadata")):
         try:
             kmeans_model = PipelineModel.load(KMEANS_MODEL_PATH)
             print(f"[ML] Model KMeans berhasil dimuat dari: {KMEANS_MODEL_PATH}")

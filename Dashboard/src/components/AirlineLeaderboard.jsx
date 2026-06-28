@@ -104,12 +104,14 @@ export const airlineNames = {
   'CFI': 'Sichuan Airlines',
   'UIA': 'Ukraine International Airlines',
   'AFL': 'Aeroflot',
-  'RMF' : 'Royal Malaysian Air Force',
-  'VOZ' : 'Virgin Australia',
-  'BVT' : 'Berjaya Air',
-  'OMA' : 'Oman Air',
-  'KXP' : 'Kargo Express',
-  'BBL' : 'BBN Airlines Indonesia'
+  'RMF': 'Royal Malaysian Air Force',
+  'VOZ': 'Virgin Australia',
+  'BVT': 'Berjaya Air',
+  'OMA': 'Oman Air',
+  'KXP': 'Kargo Express',
+  'BBL': 'BBN Airlines Indonesia',
+  'RBA': 'Royal Brunei Airlines',
+  'RCH': 'Komando Mobilitas Udara Angkatan Udara Amerika Serikat'
 };
 
 export const getAirlineName = (icao) => airlineNames[icao] || 'Unknown Airline';

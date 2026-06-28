@@ -204,7 +204,7 @@ def gold_weather_impact_analysis(silver_df):
 
 # ─── Helper: Write Gold Table ─────────────────────────────
 def write_gold_table(df, table_name):
-    """Menulis DataFrame ke Delta Lake Gold layer (overwrite)."""
+    """Menulis DataFrame ke Delta Lake Gold layer (overwrite) dan Redis."""
     path = f"{GOLD_BASE}/{table_name}"
     row_count = df.count()
     (
@@ -215,6 +215,24 @@ def write_gold_table(df, table_name):
         .save(path)
     )
     print(f"[GOLD] ✅ {table_name}: {row_count} rows → {path}")
+
+    # Simpan juga ke Redis untuk dashboard
+    try:
+        import redis
+        import json
+        redis_host = os.getenv("REDIS_HOST", "redis")
+        redis_port = int(os.getenv("REDIS_PORT", 6379))
+        r = redis.Redis(host=redis_host, port=redis_port, decode_responses=True)
+        
+        # Convert DataFrame to list of dicts
+        # Pyspark toJSON returns RDD of JSON strings
+        records = df.toJSON().collect()
+        parsed_records = [json.loads(record) for record in records]
+        
+        r.set(f"gold:{table_name}", json.dumps(parsed_records))
+        print(f"[GOLD] ✅ {table_name}: saved to Redis under key gold:{table_name}")
+    except Exception as e:
+        print(f"[GOLD ERROR] Failed to save {table_name} to Redis: {e}")
 
 
 def show_gold_summary(spark):

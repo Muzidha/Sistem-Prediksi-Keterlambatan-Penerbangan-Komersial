@@ -295,31 +295,26 @@ def compute_aggregate_impact(flights: List[Dict[str, Any]]) -> Dict[str, Any]:
         except (TypeError, ValueError):
             return default
 
-    total_pax = sum(to_int(f.get("affected_passengers", 0)) for f in flights)
-    total_comp = sum(to_int(f.get("estimated_compensation_eur", 0)) for f in flights)
+    # ✅ FIX: hanya hitung passengers & compensation dari flight yang delay
+    delayed_flights = [
+        f for f in flights
+        if f.get("delay_category", "") not in ("ON TIME", "", "UNKNOWN")
+    ]
+
+    total_pax = sum(to_int(f.get("affected_passengers", 0)) for f in delayed_flights)
+    total_comp = sum(to_int(f.get("estimated_compensation_eur", 0)) for f in delayed_flights)
     high_fdi = sum(1 for f in flights if f.get("fdi_category") in ("HIGH", "CRITICAL"))
     critical = sum(1 for f in flights if f.get("delay_category") == "CRITICAL DELAY")
-    avg_fdi = (sum(to_float(f.get("fdi", 0)) for f in flights) / max(len(flights), 1))
 
-    # Hitung RES untuk setiap flight lalu agregat
-    res_values = []
-    high_res_count = 0
-    for f in flights:
-        ripple = compute_ripple_effect_score(f)
-        res_values.append(ripple["res"])
-        if ripple["res_category"] in ("HIGH", "CRITICAL"):
-            high_res_count += 1
-    avg_res = sum(res_values) / max(len(res_values), 1) if res_values else 0.0
+    # ✅ FIX: avg_fdi hanya dari flight yang delay
+    fdi_values = [to_float(f.get("fdi", 0)) for f in delayed_flights]
+    avg_fdi = sum(fdi_values) / max(len(fdi_values), 1) if fdi_values else 0.0
 
     return {
-        "total_flights": len(flights),
-        "high_fdi_flights": high_fdi,
         "critical_delay_flights": critical,
-        "high_res_flights": high_res_count,
-        "total_affected_passengers": total_pax,
         "total_estimated_compensation_eur": total_comp,
-        "avg_fdi": round(avg_fdi, 1),
-        "avg_res": round(avg_res, 1),
+        "total_affected_passengers": total_pax,
+        "avg_fdi": avg_fdi
     }
 
 
@@ -646,6 +641,25 @@ async def api_alerts(
         "limit": limit,
         "alerts": alerts,
     }
+
+
+@app.get("/api/gold/{table_name}")
+async def api_gold_table(table_name: str):
+    """Ambil data agregasi Gold dari Delta Lake (via Redis)."""
+    valid_tables = [
+        "airline_daily_performance",
+        "route_daily_statistics",
+        "hourly_delay_trends",
+        "weather_impact_analysis",
+    ]
+    if table_name not in valid_tables:
+        return {"error": "Invalid table_name", "valid_tables": valid_tables}
+    
+    data = redis_client.get(f"gold:{table_name}")
+    if not data:
+        return []
+    
+    return json.loads(data)
 
 
 # ─── WebSocket Endpoint ────────────────────────────────────

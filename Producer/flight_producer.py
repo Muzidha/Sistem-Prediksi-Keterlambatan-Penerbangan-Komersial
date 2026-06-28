@@ -14,7 +14,6 @@ KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:29092")
 KAFKA_TOPIC     = os.getenv("KAFKA_TOPIC", "commercial-flight-stream")
 POLL_INTERVAL   = int(os.getenv("POLL_INTERVAL_SECONDS", 30))
 BOUNDS          = "6,-11,95,141"
-OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY", "7fe2acea0cac01fef802df31f7bb48a8")
 
 weather_cache = {}
 
@@ -60,40 +59,31 @@ def fetch_weather(lat, lon):
         "weather_code":     c.get("weathercode", 0),
     }
 
-def fetch_weather_openweather(lat, lon):
-    url = "https://api.openweathermap.org/data/2.5/weather"
+def fetch_weather_brightsky(lat, lon):
+    url = "https://api.brightsky.dev/current_weather"
     params = {
-        "lat": lat, "lon": lon,
-        "appid": OPENWEATHER_API_KEY,
-        "units": "metric"
+        "lat": lat, 
+        "lon": lon
     }
     resp = requests.get(url, params=params, timeout=10)
     resp.raise_for_status()
-    data = resp.json()
-    
-    wind_ms = data.get("wind", {}).get("speed", 0)
-    wind_knots = wind_ms * 1.94384
-    
-    rain_1h = data.get("rain", {}).get("1h", 0)
-    snow_1h = data.get("snow", {}).get("1h", 0)
-    precip_mm = rain_1h + snow_1h
-    
-    visibility_m = data.get("visibility", 10000)
-    
-    weather_list = data.get("weather", [])
-    weather_code = weather_list[0].get("id", 0) if weather_list else 0
+    data = resp.json().get("weather", {})
     
     return {
-        "precipitation_mm": precip_mm,
-        "wind_knots":       round(wind_knots, 2),
-        "visibility_m":     visibility_m,
-        "weather_code":     weather_code,
+        "precipitation_mm": data.get("precipitation_60", 0.0),
+        "wind_knots":       data.get("wind_speed_60", 0.0),
+        "visibility_m":     data.get("visibility", 10000),
+        "weather_code":     data.get("weather_code", data.get("wmo_code", 0)),
     }
 
 def get_weather_cached(lat, lon):
-    # Round coordinates to 1 decimal place (~11 km) to reuse weather data
-    key = (round(lat, 1), round(lon, 1))
+    # Round coordinates to 0 decimal place (~111 km) to heavily reuse weather data and avoid 429
+    key = (round(lat, 0), round(lon, 0))
     now = time.time()
+    
+    # Check if we are globally rate limited (pause for 60s if 429 was recently hit)
+    if getattr(get_weather_cached, "rate_limited_until", 0) > now:
+        return {}
     
     # Cache hit: return if less than 30 minutes (1800s) old
     if key in weather_cache and (now - weather_cache[key][0]) < 1800:
@@ -104,15 +94,24 @@ def get_weather_cached(lat, lon):
         w = fetch_weather(lat, lon)
         weather_cache[key] = (now, w)
         return w
-    except Exception as e:
-        log(f"Open-Meteo fetch failed for {key}: {e}. Trying OpenWeatherMap...")
+    except requests.exceptions.HTTPError as e:
+        if e.response.status_code == 429:
+            log(f"Global 429 Rate Limit hit. Pausing API requests for 60 seconds.")
+            get_weather_cached.rate_limited_until = now + 60
+        log(f"Open-Meteo fetch failed for {key}: {e}. Trying Bright Sky...")
         try:
-            w = fetch_weather_openweather(lat, lon)
+            w = fetch_weather_brightsky(lat, lon)
             weather_cache[key] = (now, w)
             return w
         except Exception as e2:
-            log(f"OpenWeatherMap fetch failed for {key}: {e2}.")
+            log(f"Bright Sky fetch failed for {key}: {e2}.")
+            # Cache empty result for 5 minutes so we don't retry immediately
+            weather_cache[key] = (now - 1500, {}) 
             return {}
+    except Exception as e:
+        log(f"Fetch failed for {key}: {e}")
+        weather_cache[key] = (now - 1500, {}) 
+        return {}
 
 def parse_flight(flight_id, raw):
     try:
@@ -171,8 +170,8 @@ def main():
 
             flights_sent = 0
             
-            # Using ThreadPoolExecutor to speed up weather fetching (max_workers=5 to avoid 429 rate limit)
-            with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            # Using ThreadPoolExecutor (max_workers=2 to avoid 429 rate limit)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
                 futures = []
                 for flight_id, raw in raw_data.items():
                     if flight_id in ["full_count", "version"]:

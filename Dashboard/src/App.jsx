@@ -4,6 +4,7 @@ import KPIHeader from './components/KPIHeader';
 import LiveMap from './components/LiveMap';
 import HighRiskTable from './components/HighRiskTable';
 import AirlineLeaderboard from './components/AirlineLeaderboard';
+import DeltaLakeInsights from './components/DeltaLakeInsights';
 
 function App() {
   const [data, setData] = useState({
@@ -143,6 +144,7 @@ function App() {
         {/* Bottom Full Width Table */}
         <div style={{ pointerEvents: 'auto', marginTop: '1rem', width: '100%' }}>
           <HighRiskTable alerts={data.alerts} />
+          <DeltaLakeInsights />
         </div>
       </div>
     </div>
